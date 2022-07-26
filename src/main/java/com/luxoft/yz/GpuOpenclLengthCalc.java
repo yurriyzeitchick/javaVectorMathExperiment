@@ -11,13 +11,13 @@ import java.util.stream.DoubleStream;
  * @author YZaychyk
  * @since 1.0
  **/
-public class GpuOpclLengthCalc
+public class GpuOpenclLengthCalc
 {
     public static void main(String[] args) {
         KernelManager.instance().getDefaultPreferences().getPreferredDevices(null).forEach(System.out::println);
     }
 
-    public static double calculate(VectorLine line) {
+    public static double calculate(VectorLine line, boolean addLogging) {
         var x1 = line.latitudes();
         var x2 = Arrays.copyOfRange(x1, 1, x1.length);
         var y1 = line.longitudes();
@@ -37,10 +37,14 @@ public class GpuOpclLengthCalc
         };
 
         kernel.execute(Range.create(x2.length));
-        var sb = new StringBuilder();
-        KernelManager.instance().reportDeviceUsage(sb, true);
-        System.out.println(sb);
+        //var sb = new StringBuilder();
+        //KernelManager.instance().reportDeviceUsage(sb, true);
+        //System.out.println(sb);
         kernel.dispose();
         return DoubleStream.of(hypotenouses).map(Math::sqrt).sum();
+    }
+
+    public static double calculate(VectorLine line) {
+        return calculate(line, false);
     }
 }

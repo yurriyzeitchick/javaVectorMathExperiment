@@ -2,7 +2,6 @@ package com.luxoft.yz;
 
 import org.geotools.data.DataStore;
 import org.geotools.data.FileDataStoreFinder;
-import org.geotools.data.simple.SimpleFeatureIterator;
 import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.LineString;
 import org.locationtech.jts.geom.MultiLineString;
@@ -14,8 +13,8 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Properties;
-import java.util.TimeZone;
+import java.util.*;
+import java.util.function.Consumer;
 
 /**
  * @author YZaychyk
@@ -27,13 +26,7 @@ public class LengthExperiment {
 
     public static void main(String[] args) {
         readConfig();
-        /*runFor(WktGeometries.WKT_LS_17_POINTS);
-        runFor(WktGeometries.WKT_LS_19_POINTS);
-        runFor(WktGeometries.WKT_LS_250_POINTS);*/
-        cudaLengthExperiment();
-        //runAparapiGPU();
-
-
+        compareGPGPU();
     }
 
     public static void readConfig() {
@@ -45,6 +38,26 @@ public class LengthExperiment {
         }
     }
 
+    public static void compareGPGPU() {
+        var geometries = getGeometriesFromShapeFile();
+        var vectors = convert(geometries);
+
+        System.out.println("Measuring CUDA");
+        measure("CUDA", vectors.size(), vectors, LengthExperiment::cudaLengthExperiment);
+        measure("CUDA", vectors.size(), vectors, LengthExperiment::cudaLengthExperiment);
+        measure("CUDA", vectors.size(), vectors, LengthExperiment::cudaLengthExperiment);
+
+        System.out.println("\n\nMeasuring OpenCL");
+        measure("OpenCL", vectors.size(), vectors, LengthExperiment::openclLengthExperiment);
+        measure("OpenCL", vectors.size(), vectors, LengthExperiment::openclLengthExperiment);
+        measure("OpenCL", vectors.size(), vectors, LengthExperiment::openclLengthExperiment);
+
+        System.out.println("\n\nMeasuring SCALAR");
+        measure("SCALAR", geometries.size(), geometries, LengthExperiment::scalarLengthExperiment);
+        measure("SCALAR", geometries.size(), geometries, LengthExperiment::scalarLengthExperiment);
+        measure("SCALAR", geometries.size(), geometries, LengthExperiment::scalarLengthExperiment);
+    }
+
     public static void runFor(String wkt) {
         var geom = getGeom(wkt);
         System.out.printf("============= Length calculation experiment for  %s with %d points =============\n", geom.getGeometryType(), geom.getNumPoints());
@@ -53,55 +66,63 @@ public class LengthExperiment {
 
     }
 
-    public static void runJcudaGPU() {
-        var geom = getGeom(WktGeometries.WKT_LS_17_POINTS);
-        GpuCudaLengthCalc.init();
-        var length = GpuCudaLengthCalc.calculate(VectorLine.of((LineString) geom));
-        System.out.println(length);
-
-    }
-
-    public static void cudaLengthExperiment() {
-        GpuCudaLengthCalc.init();
-        var geometriesIterator = getGeometriesFromShapeFile();
-
-        var startTime = System.currentTimeMillis();
-        while (geometriesIterator.hasNext()) {
-            Geometry geom = (Geometry)geometriesIterator.next().getDefaultGeometry();
+    public static Collection<VectorLine> convert(Collection<Geometry> geometries) {
+        var vectors = new ArrayList<VectorLine>(geometries.size());
+        for (var geom : geometries) {
             if (geom.getGeometryType().equalsIgnoreCase(MultiLineString.TYPENAME_MULTILINESTRING)) {
-                MultiLineString multiLineString = (MultiLineString) geom;
-                for (int i = 0; i < multiLineString.getNumGeometries(); i++)
-                    GpuCudaLengthCalc.calculate(VectorLine.of((LineString) multiLineString.getGeometryN(i)));
+                for (int i = 0; i < geom.getNumGeometries(); i++)
+                    vectors.add(VectorLine.of((LineString) geom.getGeometryN(i)));
             }
             else if (geom.getGeometryType().equalsIgnoreCase(LineString.TYPENAME_LINESTRING)) {
-                GpuCudaLengthCalc.calculate(VectorLine.of((LineString) geom));
+                vectors.add(VectorLine.of((LineString) geom));
             }
         }
-
-
-        var endTime = System.currentTimeMillis();
-        System.out.println("CUDA length experiment took:" + LocalTime.ofInstant(Instant.ofEpochMilli(endTime - startTime), TimeZone.getDefault().toZoneId()).format(
-                DateTimeFormatter.ofPattern("mm:ss:nnn")));
+        return vectors;
     }
 
-    public static SimpleFeatureIterator getGeometriesFromShapeFile() {
+    public static <L> void measure(String methodName, int geometriesCount, Collection<L> items, Consumer<Collection<L>> calculator) {
+        var startTime = System.currentTimeMillis();
+        calculator.accept(items);
+        var endTime = System.currentTimeMillis();
+        System.out.println(methodName + " length experiment took:" + LocalTime.ofInstant(Instant.ofEpochMilli(endTime - startTime),
+                TimeZone.getDefault().toZoneId()).format(DateTimeFormatter.ofPattern("mm:ss:nnn")));
+    }
+
+    public static void scalarLengthExperiment(Collection<Geometry> geometries) {
+        for (var geom : geometries)
+            geom.getLength();
+    }
+
+    public static void cudaLengthExperiment(Collection<VectorLine> vectors) {
+        GpuCudaLengthCalc.init();
+        for (var vector : vectors)
+            GpuCudaLengthCalc.calculate(vector);
+    }
+
+    public static void openclLengthExperiment(Collection<VectorLine> vectors) {
+       for (var vector : vectors)
+           GpuOpenclLengthCalc.calculate(vector);
+    }
+
+    public static List<Geometry> getGeometriesFromShapeFile() {
         DataStore dataStore = null;
         try {
             dataStore = FileDataStoreFinder.getDataStore(Path.of(config.getProperty("test.shapefile.path")).toFile());
             var featureSource = dataStore.getFeatureSource(dataStore.getTypeNames()[0]);
-            return featureSource.getFeatures().features();
+            var iterator = featureSource.getFeatures().features();
+            var geometries = new ArrayList<Geometry>();
+
+            while (iterator.hasNext())
+                geometries.add((Geometry) iterator.next().getDefaultGeometry());
+
+            iterator.close();
+            return geometries;
         } catch (IOException e) {
             throw new RuntimeException(e);
         } finally {
             if (dataStore != null)
                 dataStore.dispose();
         }
-    }
-
-    public static void runAparapiGPU() {
-        var geom = getGeom(WktGeometries.WKT_LS_17_POINTS);
-        var length = GpuOpclLengthCalc.calculate(VectorLine.of((LineString) geom));
-        System.out.println(length);
     }
 
     public static double calcLengthScalar(LineString lineString)
