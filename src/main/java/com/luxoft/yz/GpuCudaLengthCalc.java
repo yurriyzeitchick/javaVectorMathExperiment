@@ -1,12 +1,5 @@
 package com.luxoft.yz;
 
-import static jcuda.driver.JCudaDriver.cuCtxCreate;
-import static jcuda.driver.JCudaDriver.cuDeviceGet;
-import static jcuda.driver.JCudaDriver.cuInit;
-import static jcuda.driver.JCudaDriver.cuMemAlloc;
-import static jcuda.driver.JCudaDriver.cuMemFree;
-import static jcuda.driver.JCudaDriver.cuMemcpyDtoH;
-import static jcuda.driver.JCudaDriver.cuMemcpyHtoD;
 import jcuda.Pointer;
 import jcuda.Sizeof;
 import jcuda.driver.CUcontext;
@@ -17,6 +10,8 @@ import jcuda.vec.VecDouble;
 
 import java.util.Arrays;
 import java.util.stream.DoubleStream;
+
+import static jcuda.driver.JCudaDriver.*;
 
 /**
  * @author YZaychyk
